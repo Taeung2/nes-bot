@@ -1,0 +1,8 @@
+python-telegram-bot==21.1.1
+python-dotenv==1.0.1
+google-generativeai
+newspaper3k
+lxml_html_clean
+flask
+beautifulsoup4
+requests
