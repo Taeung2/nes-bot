@@ -175,7 +175,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
         final_message += f"\n\n{notion_status}"
             
-        await processing_msg.edit_text(final_message, parse_mode='Markdown')
+        try:
+            await processing_msg.edit_text(final_message, parse_mode='Markdown')
+        except Exception:
+            # 텔레그램 마크다운 문법 오류 시 일반 텍스트로 안전하게 전송
+            await processing_msg.edit_text(final_message)
         
     except Exception as e:
         await processing_msg.edit_text(f"요약 중 오류가 발생했습니다.\n에러: {e}")
