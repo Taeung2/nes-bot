@@ -27,17 +27,20 @@ notion = AsyncClient(auth=NOTION_TOKEN) if NOTION_TOKEN else None
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
 
-def summarize_with_gemini(title, text):
+def summarize_with_gemini(text, user_text):
     """Gemini를 이용해 뉴스 본문을 요약하는 함수"""
     prompt = f"""
-다음 뉴스 기사(또는 텍스트)를 읽고 아래 양식에 맞춰서 요약해 줘.
+다음 뉴스 기사(또는 텍스트)를 읽고 아래 양식에 정확히 맞춰서 요약해 줘.
 
-[제목]: {title}
+[사용자 입력 텍스트]: {user_text}
+(이곳에 날짜 정보가 적혀있다면 기사 날짜로 간주해서 요약 양식의 '날짜'에 적어줘.)
 
-[본문]:
+[기사 원문]:
 {text[:4000]}
 
 [요약 양식]
+**📌 제목:** (기사의 핵심을 나타내는 제목. 본문에 제목이 있으면 쓰고, 없으면 만들어줘)
+**📅 날짜:** (사용자 입력 텍스트에 있는 날짜를 최우선으로, 없으면 원문에서 찾아 무조건 'YYYY-MM-DD' 형식으로만 적어줘. 모르면 아예 적지 마)
 **📌 3줄 요약:**
 1. 
 2. 
@@ -51,7 +54,7 @@ def summarize_with_gemini(title, text):
     except Exception as e:
         return f"요약 중 오류가 발생했습니다: {e}"
 
-async def save_to_notion(title, summary, url):
+async def save_to_notion(title, summary, url, date_str=None):
     """요약된 내용을 노션 데이터베이스에 저장하는 함수"""
     if not notion or not NOTION_DATABASE_ID:
         return "노션 API 설정이 누락되어 저장되지 않았습니다."
@@ -72,6 +75,11 @@ async def save_to_notion(title, summary, url):
         
         if url:
             properties["링크"] = {"url": url}
+            
+        if date_str:
+            properties["날짜"] = {
+                "date": {"start": date_str}
+            }
             
         if tags:
             # 다중 선택(Multi-select) 형식에 맞게 변환 (최대 100개 옵션)
@@ -163,13 +171,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_to_summarize = user_text
         
     try:
-        # Gemini 요약 요청
-        summary = summarize_with_gemini(title, text_to_summarize)
+        # 수집된 원본 제목이 있으면 본문에 합쳐서 Gemini가 참고하게 함
+        if title and title != "직접 입력한 텍스트":
+            text_to_summarize = f"[수집된 원본 제목]: {title}\n\n{text_to_summarize}"
+            
+        # Gemini 요약 요청 (사용자 텍스트 같이 전달)
+        summary = summarize_with_gemini(text_to_summarize, user_text)
+        
+        # 제목 파싱
+        title_for_notion = "제목 추출 실패"
+        title_match = re.search(r'\*\*📌 제목:\*\*\s*(.*)', summary)
+        if title_match:
+            title_for_notion = title_match.group(1).strip()
+            
+        # 날짜 파싱 (YYYY-MM-DD 형식만 추출)
+        date_for_notion = None
+        date_match = re.search(r'\*\*📅 날짜:\*\*\s*([0-9]{4}-[0-9]{2}-[0-9]{2})', summary)
+        if date_match:
+            date_for_notion = date_match.group(1).strip()
         
         # 노션 자동 저장 시도
-        notion_status = await save_to_notion(title, summary, url)
+        notion_status = await save_to_notion(title_for_notion, summary, url, date_for_notion)
         
-        final_message = f"📰 **{title}**\n\n{summary}"
+        final_message = summary
         if url:
             final_message += f"\n\n🔗 원문: {url}"
             
