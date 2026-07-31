@@ -243,12 +243,15 @@ async def generate_newsletter(bot):
     
     try:
         # 2. 노션에서 오늘 날짜의 기사들 불러오기
-        response = await notion.databases.query(
-            database_id=NOTION_DATABASE_ID,
-            filter={
-                "property": "날짜",
-                "date": {
-                    "equals": today_str
+        response = await notion.request(
+            path=f"databases/{NOTION_DATABASE_ID}/query",
+            method="POST",
+            body={
+                "filter": {
+                    "property": "날짜",
+                    "date": {
+                        "equals": today_str
+                    }
                 }
             }
         )
