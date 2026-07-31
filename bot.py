@@ -223,11 +223,12 @@ async def command_newsletter(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if chat_id != ALLOWED_CHAT_ID:
         return
     await update.message.reply_text("수동으로 오늘의 뉴스레터 발행을 시작합니다! ⏳ (작업에 10~20초 정도 소요될 수 있습니다)")
-    # 스케줄러에 즉시 실행(0초 뒤) 작업으로 추가
-    context.job_queue.run_once(generate_newsletter_job, 0)
+    
+    # asyncio.create_task를 통해 백그라운드 실행
+    context.application.create_task(generate_newsletter(context.bot))
 
-async def generate_newsletter_job(context: ContextTypes.DEFAULT_TYPE):
-    """매일 자정에 실행되는 뉴스레터 발행 작업"""
+async def generate_newsletter(bot):
+    """매일 자정에 실행되는 뉴스레터 발행 작업 (직접 봇 객체 받음)"""
     if not notion or not NOTION_DATABASE_ID:
         return
         
@@ -238,7 +239,7 @@ async def generate_newsletter_job(context: ContextTypes.DEFAULT_TYPE):
     today = datetime.datetime.now(tz)
     today_str = today.strftime('%Y-%m-%d')
     
-    await context.bot.send_message(chat_id=chat_id, text="🕒 자정입니다! 오늘의 뉴스를 모아 뉴스레터 발행을 시작합니다...")
+    await bot.send_message(chat_id=chat_id, text="🕒 자정입니다! 오늘의 뉴스를 모아 뉴스레터 발행을 시작합니다...")
     
     try:
         # 2. 노션에서 오늘 날짜의 기사들 불러오기
@@ -254,7 +255,7 @@ async def generate_newsletter_job(context: ContextTypes.DEFAULT_TYPE):
         
         results = response.get('results', [])
         if not results:
-            await context.bot.send_message(chat_id=chat_id, text="오늘은 스크랩된 기사가 없어서 뉴스레터를 발행하지 않습니다. 편안한 밤 되세요! 🌙")
+            await bot.send_message(chat_id=chat_id, text="오늘은 스크랩된 기사가 없어서 뉴스레터를 발행하지 않습니다. 편안한 밤 되세요! 🌙")
             return
             
         # 3. 텍스트 추출 및 병합
@@ -277,7 +278,7 @@ async def generate_newsletter_job(context: ContextTypes.DEFAULT_TYPE):
             news_texts.append(f"■ {page_title}\n{page_summary}")
             
         if not news_texts:
-            await context.bot.send_message(chat_id=chat_id, text="뉴스레터 발행 대상 기사가 없습니다. 🌙")
+            await bot.send_message(chat_id=chat_id, text="뉴스레터 발행 대상 기사가 없습니다. 🌙")
             return
             
         combined_news = "\n\n".join(news_texts)
@@ -324,14 +325,34 @@ async def generate_newsletter_job(context: ContextTypes.DEFAULT_TYPE):
         
         # 6. 텔레그램 발송
         try:
-            await context.bot.send_message(chat_id=chat_id, text=newsletter_text, parse_mode='Markdown')
+            await bot.send_message(chat_id=chat_id, text=newsletter_text, parse_mode='Markdown')
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text=newsletter_text)
+            await bot.send_message(chat_id=chat_id, text=newsletter_text)
             
-        await context.bot.send_message(chat_id=chat_id, text="✅ 오늘의 뉴스레터가 노션에 발행 및 저장되었습니다! 굿나잇! 🌙")
+        await bot.send_message(chat_id=chat_id, text="✅ 오늘의 뉴스레터가 노션에 발행 및 저장되었습니다! 굿나잇! 🌙")
         
     except Exception as e:
-        await context.bot.send_message(chat_id=chat_id, text=f"뉴스레터 발행 중 오류가 발생했습니다: {e}")
+        await bot.send_message(chat_id=chat_id, text=f"뉴스레터 발행 중 오류가 발생했습니다: {e}")
+
+async def daily_timer_loop(application: Application):
+    """APScheduler 대신 asyncio로 직접 만든 자정 타이머"""
+    tz = pytz.timezone('Asia/Seoul')
+    while True:
+        now = datetime.datetime.now(tz)
+        tomorrow = now + datetime.timedelta(days=1)
+        midnight = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # 테스트를 위해 10초 뒤로 세팅하지 않고 정상적으로 자정 계산
+        sleep_seconds = (midnight - now).total_seconds()
+        
+        await asyncio.sleep(sleep_seconds)
+        
+        # 자정이 되면 뉴스레터 발행
+        await generate_newsletter(application.bot)
+
+async def post_init(application: Application):
+    """봇 시작 시 타이머 루프 실행"""
+    application.create_task(daily_timer_loop(application))
 
 def main():
     try:
@@ -353,12 +374,8 @@ def main():
     threading.Thread(target=run_web, daemon=True).start()
     print("클라우드용 웹 서버가 시작되었습니다.")
         
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    
-    # 자정 스케줄러 등록
-    tz = pytz.timezone('Asia/Seoul')
-    t = datetime.time(hour=0, minute=0, tzinfo=tz) # 매일 밤 12시(자정)
-    app.job_queue.run_daily(generate_newsletter_job, time=t)
+    # post_init을 통해 타이머 루프를 등록
+    app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("newsletter", command_newsletter))
