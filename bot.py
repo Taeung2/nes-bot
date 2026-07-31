@@ -3,6 +3,7 @@ import asyncio
 import re
 import threading
 import datetime
+import pytz
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -214,7 +215,123 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id != ALLOWED_CHAT_ID:
         await update.message.reply_text("이 봇을 사용할 권한이 없습니다.")
         return
-    await update.message.reply_text("환영합니다! 뉴스 링크(URL)나 긴 글을 그대로 복사해서 보내주시면 AI가 3줄로 요약해 드립니다.")
+    await update.message.reply_text("환영합니다! 뉴스 링크(URL)나 긴 글을 그대로 복사해서 보내주시면 AI가 3줄로 요약해 드립니다.\n(수동으로 오늘의 뉴스레터를 발행하려면 /newsletter 를 입력하세요!)")
+
+async def command_newsletter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """사용자가 원할 때 즉시 뉴스레터를 발행하는 수동 명령어"""
+    chat_id = str(update.effective_chat.id)
+    if chat_id != ALLOWED_CHAT_ID:
+        return
+    await update.message.reply_text("수동으로 오늘의 뉴스레터 발행을 시작합니다! ⏳ (작업에 10~20초 정도 소요될 수 있습니다)")
+    # 스케줄러에 즉시 실행(0초 뒤) 작업으로 추가
+    context.job_queue.run_once(generate_newsletter_job, 0)
+
+async def generate_newsletter_job(context: ContextTypes.DEFAULT_TYPE):
+    """매일 자정에 실행되는 뉴스레터 발행 작업"""
+    if not notion or not NOTION_DATABASE_ID:
+        return
+        
+    chat_id = ALLOWED_CHAT_ID
+    
+    # 1. 오늘 날짜 구하기
+    tz = pytz.timezone('Asia/Seoul')
+    today = datetime.datetime.now(tz)
+    today_str = today.strftime('%Y-%m-%d')
+    
+    await context.bot.send_message(chat_id=chat_id, text="🕒 자정입니다! 오늘의 뉴스를 모아 뉴스레터 발행을 시작합니다...")
+    
+    try:
+        # 2. 노션에서 오늘 날짜의 기사들 불러오기
+        response = await notion.databases.query(
+            database_id=NOTION_DATABASE_ID,
+            filter={
+                "property": "날짜",
+                "date": {
+                    "equals": today_str
+                }
+            }
+        )
+        
+        results = response.get('results', [])
+        if not results:
+            await context.bot.send_message(chat_id=chat_id, text="오늘은 스크랩된 기사가 없어서 뉴스레터를 발행하지 않습니다. 편안한 밤 되세요! 🌙")
+            return
+            
+        # 3. 텍스트 추출 및 병합
+        news_texts = []
+        for page in results:
+            props = page.get('properties', {})
+            
+            # 뉴스레터 본인은 제외
+            tags = props.get('키워드', {}).get('multi_select', [])
+            is_newsletter = any(t.get('name') == '#일간뉴스레터' for t in tags)
+            if is_newsletter:
+                continue
+                
+            title_prop = props.get('제목', {}).get('title', [])
+            page_title = title_prop[0]['text']['content'] if title_prop else "제목 없음"
+            
+            summary_prop = props.get('요약', {}).get('rich_text', [])
+            page_summary = "".join([t['text']['content'] for t in summary_prop]) if summary_prop else ""
+            
+            news_texts.append(f"■ {page_title}\n{page_summary}")
+            
+        if not news_texts:
+            await context.bot.send_message(chat_id=chat_id, text="뉴스레터 발행 대상 기사가 없습니다. 🌙")
+            return
+            
+        combined_news = "\n\n".join(news_texts)
+        
+        # 4. Gemini에게 뉴스레터 작성 요청
+        prompt = f"""
+오늘 사용자님이 수집한 뉴스 기사들의 요약본 모음입니다.
+
+{combined_news[:25000]}
+
+위 내용들을 종합하여, 하루를 마무리하며 읽기 좋은 '일간 종합 뉴스레터'를 작성해 줘.
+독자가 오늘의 핵심 트렌드와 주요 이슈를 한눈에 파악할 수 있도록 흐름을 짚어주고, 매거진 편집장처럼 부드럽고 전문적인 톤으로 작성해 줘.
+반드시 아래 양식에 정확히 맞춰서 답변해 줘.
+
+[요약 양식]
+**📌 제목:** (예: [일간 뉴스레터] 2026-07-31 종합 요약 - 반도체 훈풍과 부동산 규제 완화)
+**📅 날짜:** {today_str}
+**📌 3줄 요약:**
+1. 
+2. 
+3. 
+
+**📰 오늘의 상세 브리핑:**
+(주제별 또는 흐름별로 기사 내용을 엮어서 자세하고 맛깔나게 설명해 줘)
+"""
+        newsletter_response = model.generate_content(prompt)
+        newsletter_text = newsletter_response.text
+        
+        # 5. 노션에 저장
+        title_match = re.search(r'\*\*📌 제목:\*\*\s*(.*)', newsletter_text)
+        newsletter_title = title_match.group(1).strip() if title_match else f"[일간 뉴스레터] {today_str} 종합 요약"
+        
+        properties = {
+            "제목": {"title": [{"text": {"content": newsletter_title[:2000]}}]},
+            "요약": {"rich_text": [{"text": {"content": newsletter_text[:2000]}}]},
+            "날짜": {"date": {"start": today_str}},
+            "키워드": {"multi_select": [{"name": "#일간뉴스레터"}]}
+        }
+        
+        await notion.pages.create(
+            parent={"database_id": NOTION_DATABASE_ID},
+            properties=properties
+        )
+        
+        # 6. 텔레그램 발송
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=newsletter_text, parse_mode='Markdown')
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text=newsletter_text)
+            
+        await context.bot.send_message(chat_id=chat_id, text="✅ 오늘의 뉴스레터가 노션에 발행 및 저장되었습니다! 굿나잇! 🌙")
+        
+    except Exception as e:
+        await context.bot.send_message(chat_id=chat_id, text=f"뉴스레터 발행 중 오류가 발생했습니다: {e}")
 
 def main():
     try:
@@ -237,7 +354,14 @@ def main():
     print("클라우드용 웹 서버가 시작되었습니다.")
         
     app = Application.builder().token(TELEGRAM_TOKEN).build()
+    
+    # 자정 스케줄러 등록
+    tz = pytz.timezone('Asia/Seoul')
+    t = datetime.time(hour=0, minute=0, tzinfo=tz) # 매일 밤 12시(자정)
+    app.job_queue.run_daily(generate_newsletter_job, time=t)
+    
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("newsletter", command_newsletter))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     print("AI 뉴스 요약 비서 봇이 실행되었습니다!")

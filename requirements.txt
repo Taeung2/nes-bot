@@ -7,3 +7,5 @@ flask
 beautifulsoup4
 requests
 notion-client
+pytz
+APScheduler
