@@ -47,7 +47,7 @@ def summarize_with_gemini(text, user_text):
 2. 
 3. 
 
-**🔑 핵심 키워드:** #키워드1 #키워드2 #키워드3
+**🔑 핵심 키워드:** (반드시 다음 카테고리 중에서 기사에 맞는 1~2개만 골라서 해시태그로 적어줘: #거시경제 #기업_실적 #증시_시황 #부동산 #반도체_IT #가상화폐 #환율_원자재 #정책_규제 #기타)
 """
     try:
         response = model.generate_content(prompt)
