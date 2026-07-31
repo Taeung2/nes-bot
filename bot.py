@@ -26,7 +26,7 @@ notion = AsyncClient(auth=NOTION_TOKEN) if NOTION_TOKEN else None
 
 # 2. Gemini API 설정
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 def summarize_with_gemini(text, user_text):
     """Gemini를 이용해 뉴스 본문을 요약하는 함수"""
