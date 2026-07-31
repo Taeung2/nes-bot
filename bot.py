@@ -2,6 +2,7 @@ import os
 import asyncio
 import re
 import threading
+import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -29,18 +30,18 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 
 def summarize_with_gemini(text, user_text):
     """Gemini를 이용해 뉴스 본문을 요약하는 함수"""
+    today_str = datetime.datetime.now().strftime('%Y-%m-%d')
     prompt = f"""
 다음 뉴스 기사(또는 텍스트)를 읽고 아래 양식에 정확히 맞춰서 요약해 줘.
 
 [사용자 입력 텍스트]: {user_text}
-(이곳에 날짜 정보가 적혀있다면 기사 날짜로 간주해서 요약 양식의 '날짜'에 적어줘.)
 
 [기사 원문]:
 {text[:4000]}
 
 [요약 양식]
 **📌 제목:** (기사의 핵심을 나타내는 제목. 본문에 제목이 있으면 쓰고, 없으면 만들어줘)
-**📅 날짜:** (사용자 입력 텍스트에 있는 날짜를 최우선으로, 없으면 원문에서 찾아 무조건 'YYYY-MM-DD' 형식으로만 적어줘. 모르면 아예 적지 마)
+**📅 날짜:** (원문에서 발행일을 찾아 'YYYY-MM-DD' 형식으로 적어줘. 단, 날짜를 찾을 수 없거나 사용자가 링크 없이 텍스트만 직접 입력한 경우, 요크에게 이 글을 전달한 오늘 날짜인 '{today_str}'를 무조건 적어줘.)
 **📌 3줄 요약:**
 1. 
 2. 
