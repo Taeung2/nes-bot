@@ -10,12 +10,18 @@ from newspaper import Article, Config
 from bs4 import BeautifulSoup
 import requests
 from flask import Flask
+from notion_client import AsyncClient
 
 # 1. 환경변수 로드
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 ALLOWED_CHAT_ID = os.getenv("ALLOWED_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+NOTION_TOKEN = os.getenv("NOTION_TOKEN")
+NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+
+# 노션 클라이언트 초기화
+notion = AsyncClient(auth=NOTION_TOKEN) if NOTION_TOKEN else None
 
 # 2. Gemini API 설정
 genai.configure(api_key=GEMINI_API_KEY)
@@ -44,6 +50,42 @@ def summarize_with_gemini(title, text):
         return response.text
     except Exception as e:
         return f"요약 중 오류가 발생했습니다: {e}"
+
+async def save_to_notion(title, summary, url):
+    """요약된 내용을 노션 데이터베이스에 저장하는 함수"""
+    if not notion or not NOTION_DATABASE_ID:
+        return "노션 API 설정이 누락되어 저장되지 않았습니다."
+        
+    try:
+        # 요약본에서 #키워드 추출
+        tags = re.findall(r'#([^\s#]+)', summary)
+        
+        # 노션 API에 보낼 속성(properties) 구성
+        properties = {
+            "제목": {
+                "title": [{"text": {"content": title[:2000]}}]
+            },
+            "요약": {
+                "rich_text": [{"text": {"content": summary[:2000]}}]
+            }
+        }
+        
+        if url:
+            properties["링크"] = {"url": url}
+            
+        if tags:
+            # 다중 선택(Multi-select) 형식에 맞게 변환 (최대 100개 옵션)
+            properties["키워드"] = {
+                "multi_select": [{"name": tag[:100]} for tag in tags[:10]]
+            }
+            
+        await notion.pages.create(
+            parent={"database_id": NOTION_DATABASE_ID},
+            properties=properties
+        )
+        return "✅ 노션에 성공적으로 저장되었습니다!"
+    except Exception as e:
+        return f"❌ 노션 저장 실패: {e}"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
@@ -124,9 +166,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Gemini 요약 요청
         summary = summarize_with_gemini(title, text_to_summarize)
         
+        # 노션 자동 저장 시도
+        notion_status = await save_to_notion(title, summary, url)
+        
         final_message = f"📰 **{title}**\n\n{summary}"
         if url:
             final_message += f"\n\n🔗 원문: {url}"
+            
+        final_message += f"\n\n{notion_status}"
             
         await processing_msg.edit_text(final_message, parse_mode='Markdown')
         

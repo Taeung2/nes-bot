@@ -6,3 +6,4 @@ lxml_html_clean
 flask
 beautifulsoup4
 requests
+notion-client
