@@ -21,6 +21,14 @@ ALLOWED_CHAT_ID = os.getenv("ALLOWED_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+if NOTION_DATABASE_ID:
+    # URL 전체를 복사했거나 공백이 들어간 경우를 대비해 순수 ID만 추출
+    import re
+    _match = re.search(r'([a-fA-F0-9]{32}|[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})', NOTION_DATABASE_ID)
+    if _match:
+        NOTION_DATABASE_ID = _match.group(1).replace('-', '')
+    else:
+        NOTION_DATABASE_ID = NOTION_DATABASE_ID.split("?")[0].split("/")[-1].strip()
 
 # 노션 클라이언트 초기화
 notion = AsyncClient(auth=NOTION_TOKEN) if NOTION_TOKEN else None
