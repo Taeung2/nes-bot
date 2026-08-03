@@ -384,8 +384,9 @@ async def daily_timer_loop(application: Application):
         
         await asyncio.sleep(sleep_seconds)
         
-        # 자정이 되면 뉴스레터 발행
-        await generate_newsletter(application.bot)
+        # 자정이 되면 뉴스레터 발행 (방금 끝난 어제 날짜 기준)
+        yesterday_str = now.strftime('%Y-%m-%d')
+        await generate_newsletter(application.bot, target_date_str=yesterday_str)
 
 async def post_init(application: Application):
     """봇 시작 시 타이머 루프 실행"""
