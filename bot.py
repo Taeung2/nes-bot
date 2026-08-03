@@ -230,24 +230,39 @@ async def command_newsletter(update: Update, context: ContextTypes.DEFAULT_TYPE)
     chat_id = str(update.effective_chat.id)
     if chat_id != ALLOWED_CHAT_ID:
         return
-    await update.message.reply_text("수동으로 오늘의 뉴스레터 발행을 시작합니다! ⏳ (작업에 10~20초 정도 소요될 수 있습니다)")
+        
+    target_date = None
+    if context.args:
+        try:
+            # 예상 입력 포맷: 20260802
+            date_obj = datetime.datetime.strptime(context.args[0], '%Y%m%d')
+            target_date = date_obj.strftime('%Y-%m-%d')
+            await update.message.reply_text(f"수동으로 {target_date}의 뉴스레터 발행을 시작합니다! ⏳ (작업에 10~20초 정도 소요될 수 있습니다)")
+        except ValueError:
+            await update.message.reply_text("날짜 형식이 올바르지 않습니다. '/newsletter 20260802' 형식으로 입력해주세요.")
+            return
+    else:
+        await update.message.reply_text("수동으로 오늘의 뉴스레터 발행을 시작합니다! ⏳ (작업에 10~20초 정도 소요될 수 있습니다)")
     
     # asyncio.create_task를 통해 백그라운드 실행
-    context.application.create_task(generate_newsletter(context.bot))
+    context.application.create_task(generate_newsletter(context.bot, target_date))
 
-async def generate_newsletter(bot):
+async def generate_newsletter(bot, target_date_str=None):
     """매일 자정에 실행되는 뉴스레터 발행 작업 (직접 봇 객체 받음)"""
     if not notion or not NOTION_DATABASE_ID:
         return
         
     chat_id = ALLOWED_CHAT_ID
     
-    # 1. 오늘 날짜 구하기
-    tz = pytz.timezone('Asia/Seoul')
-    today = datetime.datetime.now(tz)
-    today_str = today.strftime('%Y-%m-%d')
-    
-    await bot.send_message(chat_id=chat_id, text="🕒 자정입니다! 오늘의 뉴스를 모아 뉴스레터 발행을 시작합니다...")
+    # 1. 날짜 구하기 (입력값이 없으면 오늘 날짜)
+    if target_date_str:
+        today_str = target_date_str
+        await bot.send_message(chat_id=chat_id, text=f"🕒 {today_str}의 뉴스를 모아 뉴스레터 발행을 시작합니다...")
+    else:
+        tz = pytz.timezone('Asia/Seoul')
+        today = datetime.datetime.now(tz)
+        today_str = today.strftime('%Y-%m-%d')
+        await bot.send_message(chat_id=chat_id, text="🕒 자정입니다! 오늘의 뉴스를 모아 뉴스레터 발행을 시작합니다...")
     
     try:
         import httpx
@@ -300,16 +315,19 @@ async def generate_newsletter(bot):
             await bot.send_message(chat_id=chat_id, text="뉴스레터 발행 대상 기사가 없습니다. 🌙")
             return
             
+        await bot.send_message(chat_id=chat_id, text=f"총 {len(news_texts)}개의 기사가 수집되었습니다. 뉴스레터를 작성 중입니다... ✍️")
+            
         combined_news = "\n\n".join(news_texts)
         
         # 4. Gemini에게 뉴스레터 작성 요청
         prompt = f"""
-오늘 사용자님이 수집한 뉴스 기사들의 요약본 모음입니다.
+오늘 사용자님이 수집한 총 {len(news_texts)}개의 뉴스 기사 요약본 모음입니다.
 
 {combined_news[:25000]}
 
 위 내용들을 종합하여, 하루를 마무리하며 읽기 좋은 '일간 종합 뉴스레터'를 작성해 줘.
 독자가 오늘의 핵심 트렌드와 주요 이슈를 한눈에 파악할 수 있도록 흐름을 짚어주고, 매거진 편집장처럼 부드럽고 전문적인 톤으로 작성해 줘.
+뉴스레터의 서두에는 '오늘 총 {len(news_texts)}개의 주요 뉴스가 있었습니다.'라는 문맥을 자연스럽게 포함시켜 줘.
 반드시 아래 양식에 정확히 맞춰서 답변해 줘.
 
 [요약 양식]
