@@ -306,10 +306,13 @@ async def generate_newsletter(bot, target_date_str=None):
             title_prop = props.get('제목', {}).get('title', [])
             page_title = title_prop[0]['text']['content'] if title_prop else "제목 없음"
             
+            url_prop = props.get('링크', {}).get('url')
+            page_source = url_prop if url_prop else page_title
+            
             summary_prop = props.get('요약', {}).get('rich_text', [])
             page_summary = "".join([t['text']['content'] for t in summary_prop]) if summary_prop else ""
             
-            news_texts.append(f"■ {page_title}\n{page_summary}")
+            news_texts.append(f"■ {page_title}\n{page_summary}\n(출처: {page_source})")
             
         if not news_texts:
             await bot.send_message(chat_id=chat_id, text="뉴스레터 발행 대상 기사가 없습니다. 🌙")
@@ -328,6 +331,7 @@ async def generate_newsletter(bot, target_date_str=None):
 위 내용들을 종합하여, 하루를 마무리하며 읽기 좋은 '일간 종합 뉴스레터'를 작성해 줘.
 독자가 오늘의 핵심 트렌드와 주요 이슈를 한눈에 파악할 수 있도록 흐름을 짚어주고, 매거진 편집장처럼 부드럽고 전문적인 톤으로 작성해 줘.
 뉴스레터의 서두에는 '오늘 총 {len(news_texts)}개의 주요 뉴스가 있었습니다.'라는 문맥을 자연스럽게 포함시켜 줘.
+각 주요 요약 항목의 내용이 끝나는 부분에는 반드시 원본 데이터에 제공된 출처(URL 또는 제목)를 괄호로 감싸서 넣어줘. (예: ...전망입니다. (출처: https://...))
 반드시 아래 양식에 정확히 맞춰서 답변해 줘.
 
 [요약 양식]
