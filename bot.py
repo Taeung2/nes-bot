@@ -250,19 +250,27 @@ async def generate_newsletter(bot):
     await bot.send_message(chat_id=chat_id, text="🕒 자정입니다! 오늘의 뉴스를 모아 뉴스레터 발행을 시작합니다...")
     
     try:
-        # 2. 노션에서 오늘 날짜의 기사들 불러오기
-        response = await notion.request(
-            path=f"databases/{NOTION_DATABASE_ID}/query",
-            method="POST",
-            body={
-                "filter": {
-                    "property": "날짜",
-                    "date": {
-                        "equals": today_str
+        import httpx
+        db_id = NOTION_DATABASE_ID.replace('/', '').strip() # 혹시 모를 슬래시 제거
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"https://api.notion.com/v1/databases/{db_id}/query",
+                headers={
+                    "Authorization": f"Bearer {NOTION_TOKEN}",
+                    "Notion-Version": "2022-06-28"
+                },
+                json={
+                    "filter": {
+                        "property": "날짜",
+                        "date": {
+                            "equals": today_str
+                        }
                     }
                 }
-            }
-        )
+            )
+            if resp.status_code != 200:
+                raise Exception(f"Notion API Error: {resp.status_code} {resp.text}")
+            response = resp.json()
         
         results = response.get('results', [])
         if not results:
