@@ -33,6 +33,13 @@ if NOTION_DATABASE_ID:
 # 노션 클라이언트 초기화
 notion = AsyncClient(auth=NOTION_TOKEN) if NOTION_TOKEN else None
 
+def split_text_for_notion(text, chunk_size=1500):
+    """노션 API의 텍스트 길이 제한(UTF-16 기준 2000자)을 안전하게 피하기 위해 텍스트를 분할합니다."""
+    if not text:
+        return [{"text": {"content": ""}}]
+    return [{"text": {"content": text[i:i+chunk_size]}} for i in range(0, len(text), chunk_size)]
+
+
 # 2. Gemini API 설정
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-flash-lite-latest')
@@ -76,10 +83,10 @@ async def save_to_notion(title, summary, url, date_str=None):
         # 노션 API에 보낼 속성(properties) 구성
         properties = {
             "제목": {
-                "title": [{"text": {"content": title[:2000]}}]
+                "title": split_text_for_notion(title)
             },
             "요약": {
-                "rich_text": [{"text": {"content": summary[:2000]}}]
+                "rich_text": split_text_for_notion(summary)
             }
         }
         
@@ -353,8 +360,8 @@ async def generate_newsletter(bot, target_date_str=None):
         newsletter_title = title_match.group(1).strip() if title_match else f"[일간 뉴스레터] {today_str} 종합 요약"
         
         properties = {
-            "제목": {"title": [{"text": {"content": newsletter_title[:2000]}}]},
-            "요약": {"rich_text": [{"text": {"content": newsletter_text[:2000]}}]},
+            "제목": {"title": split_text_for_notion(newsletter_title)},
+            "요약": {"rich_text": split_text_for_notion(newsletter_text)},
             "날짜": {"date": {"start": today_str}},
             "키워드": {"multi_select": [{"name": "#일간뉴스레터"}]}
         }
